@@ -33,13 +33,13 @@ parser.add_argument("--token", type=str, help="Telegram API token given by @botf
 parser.add_argument("--admin", type=str, help="Alias of the admin user.")
 parser.add_argument("--logfile", type=str, help="Log to defined file.")
 parser.add_argument("--webhook-host", type=str, help="Sets a webhook to the specified host.")
-parser.add_argument("--webhook-port", type=int, help="Webhook port. Default is 443.", default=443)
+parser.add_argument("--webhook-port", type=str, help="Webhook port. Default is 443.", default="443")
 parser.add_argument("--webhook-listening", type=str, help="Webhook local listening IP. Default is 0.0.0.0",
                     default="0.0.0.0")
-parser.add_argument("--webhook-listening-port", type=int, help="Webhook local listening port. Default is 8080",
-                    default=8080)
+parser.add_argument("--webhook-listening-port", type=str, help="Webhook local listening port. Default is 8080",
+                    default="8080")
 parser.add_argument("--smtp-server", type=str, help="SMTP server host. Default is smtp.gmail.com", default="smtp.gmail.com")
-parser.add_argument("--smtp-port", type=int, help="SMTP server port. Default is 465.", default=465)
+parser.add_argument("--smtp-port", type=str, help="SMTP server port. Default is 465.", default="465")
 parser.add_argument("--smtp-user", type=str, help="SMTP username")
 parser.add_argument("--smtp-password", type=str, help="SMTP password")
 parser.add_argument("--email", type=str, help="Email destination")
@@ -70,16 +70,16 @@ except KeyError as key_error:
 
 try:
     args.webhook_host = os.environ[_ENV_WEBHOOK_HOST]
-    args.webhook_port = os.environ[_ENV_WEBHOOK_PORT]
+    args.webhook_port = int(os.environ[_ENV_WEBHOOK_PORT])
     args.webhook_listening = os.environ[_ENV_WEBHOOK_LISTEN]
-    args.webhook_listening_port = os.environ[_ENV_WEBHOOK_LISTEN_PORT]
+    args.webhook_listening_port = int(os.environ[_ENV_WEBHOOK_LISTEN_PORT])
 except KeyError:
     LOG.critical('No webhook configuration provided.')
     exit(1)
 
 try:
     args.smtp_server = os.environ[_ENV_SMTP_SERVER]
-    args.smtp_port= os.environ[_ENV_SMTP_PORT]
+    args.smtp_port= int(os.environ[_ENV_SMTP_PORT])
     args.smtp_user = os.environ[_ENV_SMTP_USER]
     args.smtp_password = os.environ[_ENV_SMTP_PASSWORD]
     args.email = os.environ[_ENV_EMAIL]
