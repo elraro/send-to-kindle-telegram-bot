@@ -42,7 +42,7 @@ parser.add_argument("--smtp-server", type=str, help="SMTP server host. Default i
 parser.add_argument("--smtp-port", type=int, help="SMTP server port. Default is 465.", default=465)
 parser.add_argument("--smtp-user", type=str, help="SMTP username")
 parser.add_argument("--smtp-password", type=str, help="SMTP password")
-parser.add_argument("--email", type=str, help="Email destionation")
+parser.add_argument("--email", type=str, help="Email destination")
 
 args = parser.parse_args()
 
