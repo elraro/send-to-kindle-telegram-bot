@@ -11,7 +11,7 @@ import os
 
 from persistence.loggerfactory import LoggerFactory
 
-LOG = LoggerFactory('SendToKindle.persistence').get_logger()
+LOG = LoggerFactory('EpubBot').get_logger()
 
 _ENV_TELEGRAM_BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
 _ENV_TELEGRAM_USER_ALIAS = "TELEGRAM_USER_ALIAS"
@@ -19,7 +19,6 @@ _ENV_SMTP_SERVER = "SMTP_SERVER"
 _ENV_SMTP_PORT = "SMTP_PORT"
 _ENV_SMTP_USER = "SMTP_USER"
 _ENV_SMTP_PASSWORD = "SMTP_PASSWORD"
-_ENV_EMAIL = "EMAIL"
 
 _ENV_LOGGING_FILE = 'LOGFILE'
 _ENV_WEBHOOK_HOST = 'WEBHOOK_HOST'
@@ -63,6 +62,7 @@ def parse_users_config(users_str):
                 if ':' in pair:
                     alias, email = pair.split(':', 1)
                     users[alias.strip()] = email.strip()
+            LOG.debug(f'Successfully parsed {len(users)} user(s) from configuration')
         except Exception as e:
             LOG.warning('Error parsing users configuration: %s', e)
     
@@ -75,27 +75,34 @@ except KeyError:
 
 try:
     args.token = os.environ[_ENV_TELEGRAM_BOT_TOKEN]
+    LOG.debug('Telegram bot token loaded from environment variable')
 except KeyError as key_error:
     if not args.token:
         LOG.critical(
             'No telegram bot token provided. Please do so using --token argument or %s environment variable.',
             _ENV_TELEGRAM_BOT_TOKEN)
         sys.exit(1)
+    LOG.debug('Telegram bot token loaded from command line argument')
 
 # Try to get users from environment variable first, then from command line argument
 users_config = os.environ.get(_ENV_TELEGRAM_USER_ALIAS) or args.users
+if users_config:
+    LOG.debug('Users configuration found')
 authorized_users = parse_users_config(users_config) if users_config else {}
 
 if not authorized_users:
     LOG.warning(
         'No authorized users specified. Please do so using --users argument (format: alias:email,alias2:email2) or %s environment variable.',
         _ENV_TELEGRAM_USER_ALIAS)
+else:
+    LOG.info(f'Loaded {len(authorized_users)} authorized user(s)')
 
 try:
     args.webhook_host = os.environ[_ENV_WEBHOOK_HOST]
     args.webhook_port = int(os.environ[_ENV_WEBHOOK_PORT])
     args.webhook_listening = os.environ[_ENV_WEBHOOK_LISTEN]
     args.webhook_listening_port = int(os.environ[_ENV_WEBHOOK_LISTEN_PORT])
+    LOG.info(f'Webhook configured: {args.webhook_host}:{args.webhook_port}')
 except KeyError:
     LOG.critical('No webhook configuration provided.')
     sys.exit(1)
@@ -105,7 +112,7 @@ try:
     args.smtp_port= int(os.environ[_ENV_SMTP_PORT])
     args.smtp_user = os.environ[_ENV_SMTP_USER]
     args.smtp_password = os.environ[_ENV_SMTP_PASSWORD]
-    args.email = os.environ[_ENV_EMAIL]
+    LOG.info(f'SMTP server configured: {args.smtp_server}:{args.smtp_port}')
 except KeyError:
     LOG.critical('No mail configuration provided.')
     sys.exit(1)
@@ -122,49 +129,72 @@ def get_user_email(message):
     return authorized_users.get(from_user.username)
 
 LOG.info('Starting up bot...')
-LOG.info('Authorized users: %s', ', '.join(authorized_users.keys()) if authorized_users else 'none')
+LOG.info(f'Authorized users: {", ".join(authorized_users.keys()) if authorized_users else "none"}')
 bot = telebot.TeleBot(args.token)
+LOG.info('Bot initialized successfully')
 
 @bot.message_handler(content_types=['document'], func=lambda message: message_is_from_authorized_user(message))
 def handle_document(message):
+    from_user = message.from_user
     doc = message.document
+    LOG.info(f'Document received from @{from_user.username}: {doc.file_name}')
+    
     if not doc.file_name.endswith('.epub'):
+        LOG.warning(f'Invalid file format from @{from_user.username}: {doc.file_name}')
         bot.reply_to(message, "Solo se aceptan archivos .epub.")
         return
 
-    # Descarga el archivo
-    file_info = bot.get_file(doc.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
-    print(type(downloaded_file))
-    bot.reply_to(message, f"Archivo recibido: {doc.file_name}. Enviando por correo...")
-
-    # Enviar por correo
     try:
+        # Descarga el archivo
+        LOG.debug(f'Downloading file: {doc.file_id}')
+        file_info = bot.get_file(doc.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        LOG.debug(f'File downloaded successfully, size: {len(downloaded_file)} bytes')
+        
+        bot.reply_to(message, f"Archivo recibido: {doc.file_name}. Enviando por correo...")
+
+        # Enviar por correo
         user_email = get_user_email(message)
+        LOG.info(f'Sending {doc.file_name} to {user_email} for @{from_user.username}')
         send_email_with_attachment(downloaded_file, doc.file_name, user_email)
+        LOG.info(f'Email sent successfully to {user_email}')
         bot.send_message(message.chat.id, "✅ Archivo enviado por correo correctamente.")
     except Exception as e:
+        LOG.error(f'Error processing document from @{from_user.username}: {str(e)}', exc_info=True)
         bot.send_message(message.chat.id, f"❌ Error al enviar correo: {e}")
 
 def send_email_with_attachment(downloaded_file, file_name, recipient_email):
-    msg = MIMEMultipart()
-    msg['Subject'] = 'Send to Kindle'
-    msg['From'] = args.smtp_user
-    msg['To'] = recipient_email
+    try:
+        LOG.debug(f'Preparing email for {file_name} to {recipient_email}')
+        msg = MIMEMultipart()
+        msg['Subject'] = 'Send to Kindle'
+        msg['From'] = args.smtp_user
+        msg['To'] = recipient_email
 
-    part = MIMEBase("application", "octet-stream")
-    part.set_payload(downloaded_file)
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        f'attachment; filename="{file_name}"',
-    )
-    msg.attach(part)
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(downloaded_file)
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f'attachment; filename="{file_name}"',
+        )
+        msg.attach(part)
 
-    # Enviar el correo
-    with smtplib.SMTP_SSL(args.smtp_server, args.smtp_port) as smtp:
-        smtp.login(args.smtp_user, args.smtp_password)
-        smtp.send_message(msg)
+        # Enviar el correo
+        LOG.debug(f'Connecting to SMTP server {args.smtp_server}:{args.smtp_port}')
+        with smtplib.SMTP_SSL(args.smtp_server, args.smtp_port) as smtp:
+            smtp.login(args.smtp_user, args.smtp_password)
+            LOG.debug('Authenticated with SMTP server')
+            smtp.send_message(msg)
+            LOG.debug('Email sent via SMTP')
+    except smtplib.SMTPException as e:
+        LOG.error(f'SMTP error while sending email to {recipient_email}: {str(e)}', exc_info=True)
+        raise
+    except Exception as e:
+        LOG.error(f'Unexpected error while sending email to {recipient_email}: {str(e)}', exc_info=True)
+        raise
 
+LOG.info(f'Starting webhook listener on {args.webhook_listening}:{args.webhook_listening_port}')
 webhook.start_webhook(bot, args.webhook_host, args.webhook_port, args.webhook_listening,
                           args.webhook_listening_port)
+LOG.info('Bot is now running')
